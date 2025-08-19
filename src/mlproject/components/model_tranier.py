@@ -41,7 +41,8 @@ class ModelTrainer:
             rmse = np.sqrt(mean_squared_error(actual, pred))
             mae = mean_absolute_error(actual, pred)
             r2 = r2_score(actual, pred)
-            return rmse, mae, r2
+            # Convert numpy types to native Python types for MLflow compatibility
+            return float(rmse), float(mae), float(r2)
         except Exception as e:
             logging.error(f"Error calculating metrics: {e}")
             return float('inf'), float('inf'), -float('inf')
@@ -51,9 +52,24 @@ class ModelTrainer:
         try:
             mlflow.set_tracking_uri(self.mlflow_tracking_uri)
             logging.info(f"MLflow tracking URI set to: {self.mlflow_tracking_uri}")
-            return True
+            
+            # Test the connection
+            try:
+                mlflow.get_tracking_uri()
+                return True
+            except Exception as conn_error:
+                logging.warning(f"MLflow connection test failed: {conn_error}. Using local tracking.")
+                return False
+                
         except Exception as e:
             logging.warning(f"Failed to set MLflow tracking URI: {e}. Using local tracking.")
+            return False
+
+    def is_dagshub_uri(self):
+        """Check if the tracking URI is DagsHub"""
+        try:
+            return "dagshub" in self.mlflow_tracking_uri.lower()
+        except:
             return False
 
     def log_model_safely(self, model, model_name, X_test, y_test, best_params):
@@ -63,31 +79,43 @@ class ModelTrainer:
             predicted_qualities = model.predict(X_test)
             rmse, mae, r2 = self.eval_metrics(y_test, predicted_qualities)
             
-            with mlflow.start_run():
+            with mlflow.start_run() as run:
+                # Log basic information
+                mlflow.set_tag("model_name", model_name)
+                mlflow.set_tag("mlflow.runStatus", "SUCCESS")
+                
                 # Log parameters
                 if best_params:
-                    mlflow.log_params(best_params)
+                    for param_name, param_value in best_params.items():
+                        if isinstance(param_value, (list, tuple)) and param_value:
+                            # Log the first value for hyperparameter tuning visualization
+                            mlflow.log_param(param_name, param_value[0])
+                        elif param_value:
+                            mlflow.log_param(param_name, param_value)
                 
-                # Log metrics
+                # Log metrics (ensure native Python types)
                 mlflow.log_metric("rmse", rmse)
                 mlflow.log_metric("r2", r2)
                 mlflow.log_metric("mae", mae)
                 
-                # Check tracking store type for model registry compatibility
-                tracking_url_type_store = urlparse(mlflow.get_tracking_uri()).scheme
-                
-                # DagsHub doesn't support model registry, use fallback
-                if tracking_url_type_store != "file" and not self.mlflow_tracking_uri.lower().startswith(("https://dagshub", "http://dagshub")):
+                # Log model - simplified for DagsHub compatibility
+                try:
+                    # Use the modern parameter naming
+                    mlflow.sklearn.log_model(
+                        sk_model=model, 
+                        artifact_path="model",
+                        registered_model_name=model_name if not self.is_dagshub_uri() else None
+                    )
+                except Exception as model_log_error:
+                    # Fallback for any model logging issues
+                    logging.warning(f"Model logging failed with modern API: {model_log_error}")
                     try:
-                        mlflow.sklearn.log_model(model, "model", registered_model_name=model_name)
-                        logging.info(f"Model registered successfully: {model_name}")
-                    except Exception as reg_error:
-                        logging.warning(f"Model registry failed, logging without registration: {reg_error}")
+                        # Try the older API
                         mlflow.sklearn.log_model(model, "model")
-                else:
-                    # For DagsHub and file stores, log without registration
-                    mlflow.sklearn.log_model(model, "model")
-                    logging.info(f"Model logged without registration: {model_name}")
+                    except Exception as fallback_error:
+                        logging.error(f"Fallback model logging also failed: {fallback_error}")
+                
+                logging.info(f"Model logged successfully: {model_name}")
                 
                 return rmse, mae, r2
                 
@@ -135,7 +163,7 @@ class ModelTrainer:
                 "Decision Tree": DecisionTreeRegressor(random_state=42),
                 "Gradient Boosting": GradientBoostingRegressor(random_state=42),
                 "Linear Regression": LinearRegression(n_jobs=-1),
-                "XGBRegressor": XGBRegressor(random_state=42, n_jobs=-1),
+                "XGBRegressor": XGBRegressor(random_state=42, n_jobs=-1, verbosity=0),
                 "CatBoosting Regressor": CatBoostRegressor(random_state=42, verbose=False),
                 "AdaBoost Regressor": AdaBoostRegressor(random_state=42),
             }
@@ -175,6 +203,10 @@ class ModelTrainer:
 
             # Setup MLflow
             mlflow_setup_success = self.setup_mlflow()
+            if mlflow_setup_success:
+                logging.info("MLflow tracking enabled")
+            else:
+                logging.info("Using local execution without MLflow tracking")
 
             # Evaluate models
             model_report = evaluate_models(X_train, y_train, X_test, y_test, models, params)
@@ -189,7 +221,7 @@ class ModelTrainer:
 
             print(f"This is the best model: {best_model_name} with score: {best_model_score:.4f}")
 
-            # Get best parameters
+            # Get best parameters (use empty dict if none found)
             best_params = params.get(best_model_name, {})
 
             # Log to MLflow if setup was successful
@@ -215,16 +247,23 @@ class ModelTrainer:
 
             logging.info(f"Model saved successfully to {self.model_trainer_config.trained_model_file_path}")
 
+            # Return results with native Python types
             return {
                 "model_name": best_model_name,
-                "r2_score": r2,
-                "rmse": rmse,
-                "mae": mae,
-                "model_path": self.model_trainer_config.trained_model_file_path
+                "r2_score": float(r2),
+                "rmse": float(rmse),
+                "mae": float(mae),
+                "model_path": self.model_trainer_config.trained_model_file_path,
+                "mlflow_tracking": mlflow_setup_success
             }
 
         except Exception as e:
             logging.error(f"Error in model training: {e}")
+            # Ensure MLflow run is marked as failed if it was started
+            try:
+                mlflow.set_tag("mlflow.runStatus", "FAILED")
+            except:
+                pass
             raise CustomException(f"Model training failed: {e}")
 
 # Optional: Add a main guard for testing
