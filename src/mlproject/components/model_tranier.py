@@ -5,7 +5,7 @@ from urllib.parse import urlparse
 import mlflow
 import mlflow.sklearn
 import numpy as np
-from sklearn.metrics import mean_squared_error,mean_absolute_error
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from catboost import CatBoostRegressor
 from sklearn.ensemble import (
     AdaBoostRegressor,
@@ -13,158 +13,227 @@ from sklearn.ensemble import (
     RandomForestRegressor,
 )
 from sklearn.linear_model import LinearRegression
-from sklearn.metrics import r2_score
 from sklearn.neighbors import KNeighborsRegressor
 from sklearn.tree import DecisionTreeRegressor
 from xgboost import XGBRegressor
+import warnings
 
 from src.mlproject.exception import CustomException
 from src.mlproject.logger import logging
 from src.mlproject.utils import save_object, evaluate_models
 
+# Suppress warnings for cleaner output
+warnings.filterwarnings('ignore')
 
 @dataclass
 class ModelTrainerConfig:
-    trained_model_file_path=os.path.join("artifacts","model.pkl")
+    trained_model_file_path: str = os.path.join("artifacts", "model.pkl")
+    min_r2_threshold: float = 0.6  # Minimum acceptable R2 score
 
 class ModelTrainer:
     def __init__(self):
-        self.model_trainer_config=ModelTrainerConfig()
+        self.model_trainer_config = ModelTrainerConfig()
+        self.mlflow_tracking_uri = "https://dagshub.com/polashds/study-results-predictions-mysql-mlflow-dvc-mlops-ml-aws.mlflow"
 
-    def eval_metrics(self,actual, pred):
-        rmse = np.sqrt(mean_squared_error(actual, pred))
-        mae = mean_absolute_error(actual, pred)
-        r2 = r2_score(actual, pred)
-        return rmse, mae, r2
-
-    def initiate_model_trainer(self,train_array,test_array):
+    def eval_metrics(self, actual, pred):
+        """Safely calculate evaluation metrics with error handling"""
         try:
-            logging.info("Split training and test input data")
-            X_train,y_train,X_test,y_test=(
-                train_array[:,:-1],
-                train_array[:,-1],
-                test_array[:,:-1],
-                test_array[:,-1]
-            )
-            models = {
-                "Random Forest": RandomForestRegressor(),
-                "Decision Tree": DecisionTreeRegressor(),
-                "Gradient Boosting": GradientBoostingRegressor(),
-                "Linear Regression": LinearRegression(),
-                "XGBRegressor": XGBRegressor(),
-                "CatBoosting Regressor": CatBoostRegressor(verbose=False),
-                "AdaBoost Regressor": AdaBoostRegressor(),
-            }
-            params={
-                "Decision Tree": {
-                    'criterion':['squared_error', 'friedman_mse', 'absolute_error', 'poisson'],
-                    # 'splitter':['best','random'],
-                    # 'max_features':['sqrt','log2'],
-                },
-                "Random Forest":{
-                    # 'criterion':['squared_error', 'friedman_mse', 'absolute_error', 'poisson'],
-                 
-                    # 'max_features':['sqrt','log2',None],
-                    'n_estimators': [8,16,32,64,128,256]
-                },
-                "Gradient Boosting":{
-                    # 'loss':['squared_error', 'huber', 'absolute_error', 'quantile'],
-                    'learning_rate':[.1,.01,.05,.001],
-                    'subsample':[0.6,0.7,0.75,0.8,0.85,0.9],
-                    # 'criterion':['squared_error', 'friedman_mse'],
-                    # 'max_features':['auto','sqrt','log2'],
-                    'n_estimators': [8,16,32,64,128,256]
-                },
-                "Linear Regression":{},
-                "XGBRegressor":{
-                    'learning_rate':[.1,.01,.05,.001],
-                    'n_estimators': [8,16,32,64,128,256]
-                },
-                "CatBoosting Regressor":{
-                    'depth': [6,8,10],
-                    'learning_rate': [0.01, 0.05, 0.1],
-                    'iterations': [30, 50, 100]
-                },
-                "AdaBoost Regressor":{
-                    'learning_rate':[.1,.01,0.5,.001],
-                    # 'loss':['linear','square','exponential'],
-                    'n_estimators': [8,16,32,64,128,256]
-                }
-                
-            }
-            model_report:dict=evaluate_models(X_train,y_train,X_test,y_test,models,params)
+            rmse = np.sqrt(mean_squared_error(actual, pred))
+            mae = mean_absolute_error(actual, pred)
+            r2 = r2_score(actual, pred)
+            return rmse, mae, r2
+        except Exception as e:
+            logging.error(f"Error calculating metrics: {e}")
+            return float('inf'), float('inf'), -float('inf')
 
-            ## To get best model score from dict
-            best_model_score = max(sorted(model_report.values()))
+    def setup_mlflow(self):
+        """Safely setup MLflow tracking with fallback"""
+        try:
+            mlflow.set_tracking_uri(self.mlflow_tracking_uri)
+            logging.info(f"MLflow tracking URI set to: {self.mlflow_tracking_uri}")
+            return True
+        except Exception as e:
+            logging.warning(f"Failed to set MLflow tracking URI: {e}. Using local tracking.")
+            return False
 
-             ## To get best model name from dict
-
-            best_model_name = list(model_report.keys())[
-                list(model_report.values()).index(best_model_score)
-            ]
-            best_model = models[best_model_name]
-
-            print("This is the best model:")
-            print(best_model_name)
-
-            model_names = list(params.keys())
-
-            actual_model=""
-
-            for model in model_names:
-                if best_model_name == model:
-                    actual_model = actual_model + model
-
-            best_params = params[actual_model]
-
-            mlflow.set_registry_uri("https://dagshub.com/polashds/study-results-predictions-mysql-mlflow-dvc-mlops-ml-aws.mlflow")
-            #https://dagshub.com/polashds/study-results-predictions-mysql-mlflow-dvc-mlops-ml-aws.mlflow collected from dagshub> remote>experiments>copy
-            tracking_url_type_store = urlparse(mlflow.get_tracking_uri()).scheme
-
-            # mlflow
-
+    def log_model_safely(self, model, model_name, X_test, y_test, best_params):
+        """Safely log model to MLflow with DagsHub compatibility"""
+        try:
+            # Calculate metrics
+            predicted_qualities = model.predict(X_test)
+            rmse, mae, r2 = self.eval_metrics(y_test, predicted_qualities)
+            
             with mlflow.start_run():
-
-                predicted_qualities = best_model.predict(X_test)
-
-                (rmse, mae, r2) = self.eval_metrics(y_test, predicted_qualities)
-
-                mlflow.log_params(best_params)
-
+                # Log parameters
+                if best_params:
+                    mlflow.log_params(best_params)
+                
+                # Log metrics
                 mlflow.log_metric("rmse", rmse)
                 mlflow.log_metric("r2", r2)
                 mlflow.log_metric("mae", mae)
-
-
-                # Model registry does not work with file store
-                if tracking_url_type_store != "file":
-
-                    # Register the model
-                    # There are other ways to use the Model Registry, which depends on the use case,
-                    # please refer to the doc for more information:
-                    # https://mlflow.org/docs/latest/model-registry.html#api-workflow
-                    mlflow.sklearn.log_model(best_model, "model", registered_model_name=actual_model)
+                
+                # Check tracking store type for model registry compatibility
+                tracking_url_type_store = urlparse(mlflow.get_tracking_uri()).scheme
+                
+                # DagsHub doesn't support model registry, use fallback
+                if tracking_url_type_store != "file" and not self.mlflow_tracking_uri.lower().startswith(("https://dagshub", "http://dagshub")):
+                    try:
+                        mlflow.sklearn.log_model(model, "model", registered_model_name=model_name)
+                        logging.info(f"Model registered successfully: {model_name}")
+                    except Exception as reg_error:
+                        logging.warning(f"Model registry failed, logging without registration: {reg_error}")
+                        mlflow.sklearn.log_model(model, "model")
                 else:
-                    mlflow.sklearn.log_model(best_model, "model")
+                    # For DagsHub and file stores, log without registration
+                    mlflow.sklearn.log_model(model, "model")
+                    logging.info(f"Model logged without registration: {model_name}")
+                
+                return rmse, mae, r2
+                
+        except Exception as e:
+            logging.error(f"Failed to log model to MLflow: {e}")
+            # Still calculate metrics even if MLflow fails
+            predicted_qualities = model.predict(X_test)
+            return self.eval_metrics(y_test, predicted_qualities)
 
+    def validate_data(self, train_array, test_array):
+        """Validate input data before processing"""
+        if train_array is None or test_array is None:
+            raise CustomException("Train or test array is None")
+        
+        if len(train_array) == 0 or len(test_array) == 0:
+            raise CustomException("Train or test array is empty")
+        
+        if train_array.shape[1] < 2 or test_array.shape[1] < 2:
+            raise CustomException("Arrays don't have enough features")
 
+    def initiate_model_trainer(self, train_array, test_array):
+        """Main method to initiate model training with comprehensive error handling"""
+        try:
+            # Validate input data
+            self.validate_data(train_array, test_array)
+            
+            logging.info("Split training and test input data")
+            X_train, y_train, X_test, y_test = (
+                train_array[:, :-1],
+                train_array[:, -1],
+                test_array[:, :-1],
+                test_array[:, -1]
+            )
+            
+            # Validate split data
+            if len(X_train) == 0 or len(X_test) == 0:
+                raise CustomException("Empty training or test features after split")
+            
+            if len(y_train) == 0 or len(y_test) == 0:
+                raise CustomException("Empty training or test targets after split")
 
+            # Define models with safe parameters
+            models = {
+                "Random Forest": RandomForestRegressor(random_state=42, n_jobs=-1),
+                "Decision Tree": DecisionTreeRegressor(random_state=42),
+                "Gradient Boosting": GradientBoostingRegressor(random_state=42),
+                "Linear Regression": LinearRegression(n_jobs=-1),
+                "XGBRegressor": XGBRegressor(random_state=42, n_jobs=-1),
+                "CatBoosting Regressor": CatBoostRegressor(random_state=42, verbose=False),
+                "AdaBoost Regressor": AdaBoostRegressor(random_state=42),
+            }
 
-            if best_model_score<0.6:
-                raise CustomException("No best model found")
-            logging.info(f"Best found model on both training and testing dataset")
+            params = {
+                "Decision Tree": {
+                    'criterion': ['squared_error', 'friedman_mse', 'absolute_error'],
+                    'max_depth': [None, 10, 20, 30],
+                    'min_samples_split': [2, 5, 10],
+                },
+                "Random Forest": {
+                    'n_estimators': [50, 100, 200],
+                    'max_depth': [None, 10, 20],
+                    'min_samples_split': [2, 5],
+                },
+                "Gradient Boosting": {
+                    'learning_rate': [0.1, 0.01, 0.05],
+                    'n_estimators': [50, 100, 200],
+                    'subsample': [0.8, 0.9, 1.0],
+                },
+                "Linear Regression": {},
+                "XGBRegressor": {
+                    'learning_rate': [0.1, 0.01, 0.05],
+                    'n_estimators': [50, 100, 200],
+                    'max_depth': [3, 6, 9],
+                },
+                "CatBoosting Regressor": {
+                    'depth': [4, 6, 8],
+                    'learning_rate': [0.01, 0.05, 0.1],
+                    'iterations': [50, 100, 200],
+                },
+                "AdaBoost Regressor": {
+                    'learning_rate': [0.1, 0.01, 0.5],
+                    'n_estimators': [50, 100, 200],
+                }
+            }
 
+            # Setup MLflow
+            mlflow_setup_success = self.setup_mlflow()
+
+            # Evaluate models
+            model_report = evaluate_models(X_train, y_train, X_test, y_test, models, params)
+
+            if not model_report:
+                raise CustomException("No models were successfully evaluated")
+
+            # Get best model
+            best_model_score = max(model_report.values())
+            best_model_name = [name for name, score in model_report.items() if score == best_model_score][0]
+            best_model = models[best_model_name]
+
+            print(f"This is the best model: {best_model_name} with score: {best_model_score:.4f}")
+
+            # Get best parameters
+            best_params = params.get(best_model_name, {})
+
+            # Log to MLflow if setup was successful
+            if mlflow_setup_success:
+                rmse, mae, r2 = self.log_model_safely(best_model, best_model_name, X_test, y_test, best_params)
+            else:
+                # Calculate metrics without MLflow
+                predicted = best_model.predict(X_test)
+                rmse, mae, r2 = self.eval_metrics(y_test, predicted)
+
+            # Validate model performance
+            if r2 < self.model_trainer_config.min_r2_threshold:
+                raise CustomException(f"No adequate model found. Best R2 score: {r2:.4f} "
+                                    f"(minimum required: {self.model_trainer_config.min_r2_threshold})")
+
+            logging.info(f"Best model found: {best_model_name} with R2 score: {r2:.4f}")
+
+            # Save model locally
             save_object(
                 file_path=self.model_trainer_config.trained_model_file_path,
                 obj=best_model
             )
 
-            predicted=best_model.predict(X_test)
+            logging.info(f"Model saved successfully to {self.model_trainer_config.trained_model_file_path}")
 
-            r2_square = r2_score(y_test, predicted)
-            return r2_square
-
-
+            return {
+                "model_name": best_model_name,
+                "r2_score": r2,
+                "rmse": rmse,
+                "mae": mae,
+                "model_path": self.model_trainer_config.trained_model_file_path
+            }
 
         except Exception as e:
-            raise CustomException(e,sys)
+            logging.error(f"Error in model training: {e}")
+            raise CustomException(f"Model training failed: {e}")
+
+# Optional: Add a main guard for testing
+if __name__ == "__main__":
+    # Example usage for testing
+    try:
+        trainer = ModelTrainer()
+        # You would normally pass actual data here
+        # result = trainer.initiate_model_trainer(train_data, test_data)
+        # print(result)
+    except Exception as e:
+        print(f"Error: {e}")

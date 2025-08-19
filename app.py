@@ -30,12 +30,12 @@ from src.mlproject.components.model_tranier import ModelTrainerConfig, ModelTrai
 import sys
 
 
-import dagshub
-dagshub.init(
-    repo_owner="polashds",
-    repo_name="study-results-predictions-mysql-mlflow-dvc-mlops-ml-aws",
-    mlflow=True
-)
+# import dagshub
+# dagshub.init(
+#     repo_owner="polashds",
+#     repo_name="study-results-predictions-mysql-mlflow-dvc-mlops-ml-aws",
+#     mlflow=True
+# )
 
 
 if __name__=="__main__":
