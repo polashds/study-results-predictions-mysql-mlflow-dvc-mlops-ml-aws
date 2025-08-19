@@ -1,0 +1,10 @@
+artifact_location: file:///E:/DS-Projects-Vault/projects/study-results-predictions-mysql-mlflow-dvc-mlops-ml-aws-v1/mlruns/0/models/m-b1fd8d2af6c6492da7cd6a4f8588efa9/artifacts
+creation_timestamp: 1755607300123
+experiment_id: '0'
+last_updated_timestamp: 1755607309006
+model_id: m-b1fd8d2af6c6492da7cd6a4f8588efa9
+model_type: null
+name: model
+source_run_id: ba352919a5d54bca96f7cd21216895bb
+status: 2
+status_message: null

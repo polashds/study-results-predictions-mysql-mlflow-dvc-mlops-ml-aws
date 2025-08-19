@@ -1,0 +1,14 @@
+artifact_uri: file:///E:/DS-Projects-Vault/projects/study-results-predictions-mysql-mlflow-dvc-mlops-ml-aws-v1/mlruns/0/ba352919a5d54bca96f7cd21216895bb/artifacts
+end_time: 1755607309042
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: ba352919a5d54bca96f7cd21216895bb
+run_name: marvelous-cat-535
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1755607299774
+status: 3
+tags: []
+user_id: root

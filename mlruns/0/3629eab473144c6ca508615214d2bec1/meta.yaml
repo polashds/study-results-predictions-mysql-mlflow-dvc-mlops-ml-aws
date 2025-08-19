@@ -1,0 +1,14 @@
+artifact_uri: file:///E:/DS-Projects-Vault/projects/study-results-predictions-mysql-mlflow-dvc-mlops-ml-aws-v1/mlruns/0/3629eab473144c6ca508615214d2bec1/artifacts
+end_time: 1755605847655
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 3629eab473144c6ca508615214d2bec1
+run_name: calm-bat-222
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1755605837292
+status: 3
+tags: []
+user_id: root

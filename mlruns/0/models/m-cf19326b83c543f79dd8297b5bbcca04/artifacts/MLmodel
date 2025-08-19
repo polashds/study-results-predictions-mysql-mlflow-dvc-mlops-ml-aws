@@ -1,0 +1,22 @@
+artifact_path: file:///E:/DS-Projects-Vault/projects/study-results-predictions-mysql-mlflow-dvc-mlops-ml-aws-v1/mlruns/0/models/m-cf19326b83c543f79dd8297b5bbcca04/artifacts
+flavors:
+  python_function:
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.sklearn
+    model_path: model.pkl
+    predict_fn: predict
+    python_version: 3.9.0
+  sklearn:
+    code: null
+    pickled_model: model.pkl
+    serialization_format: cloudpickle
+    sklearn_version: 1.6.1
+mlflow_version: 3.1.4
+model_id: m-cf19326b83c543f79dd8297b5bbcca04
+model_size_bytes: 708
+model_uuid: m-cf19326b83c543f79dd8297b5bbcca04
+prompts: null
+run_id: 3629eab473144c6ca508615214d2bec1
+utc_time_created: '2025-08-19 12:17:17.483244'
