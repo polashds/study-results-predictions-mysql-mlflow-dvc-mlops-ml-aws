@@ -25,8 +25,8 @@ class DataIngestion:
     def initiate_data_ingestion(self):
         try:
             ##reading the data from mysql
-            df=read_sql_data() # make it comment for data transformation after reading from mysql
-            # df=pd.read_csv(os.path.join('notebook/data','raw.csv')) # make it uncomment for data transformation after reading from mysql
+            #df=read_sql_data() # make it comment for data transformation after reading from mysql
+            df=pd.read_csv(os.path.join('notebook/data','raw.csv')) # make it uncomment for data transformation after reading from mysql
             #df=pd.read_csv(os.path.join('notebook/data','raw.csv'))
             logging.info("Reading completed mysql database")
 
